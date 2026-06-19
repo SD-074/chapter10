@@ -20,7 +20,8 @@ const refreshTokenSchema = new Schema(
     }
   },
   {
-    timestamps: { createdAt: true, updatedAt: false }
+    timestamps: { createdAt: true, updatedAt: false },
+    versionKey: false
   }
 );
 // Creates a TTL (Time-To-Live) Index. Document will be removed automatically after <REFRESH_TOKEN_TTL> seconds.

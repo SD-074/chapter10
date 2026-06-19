@@ -20,123 +20,133 @@ type UserDTO = {
   roles: string[];
   createdAt: Date;
   updatedAt: Date;
-  __v: number;
 };
 
 type MeResBody = SuccessResBody & { user: UserDTO };
 type TokenResBody = SuccessResBody & { accessToken: string };
 
-export const register: RequestHandler<{}, TokenResBody, RegisterDTO> = async (req, res) => {
-  // we need access the user info from the request body
-  const { email, password } = req.body;
-  //1) check if user has that email already
-  const userExists = await User.exists({ email });
-  // throw an error if a user has that email
-  if (userExists) throw new Error('Email already exists', { cause: { status: 409 } });
-  // 2) hash the password
-  const salt = await bcrypt.genSalt(SALT_ROUNDS);
-  const hashedPW = await bcrypt.hash(password, salt);
+export const register: RequestHandler<{}, TokenResBody, RegisterDTO> = async (req, res, next) => {
+  try {
+    // we need access the user info from the request body
+    const { email, password } = req.body;
+    //1) check if user has that email already
+    const userExists = await User.exists({ email });
+    // throw an error if a user has that email
+    if (userExists) throw new Error('Email already exists', { cause: { status: 409 } });
+    // 2) hash the password
+    const salt = await bcrypt.genSalt(SALT_ROUNDS);
+    const hashedPW = await bcrypt.hash(password, salt);
 
-  //03 create user in DB with create method
-  const user = await User.create({ ...req.body, password: hashedPW } satisfies RegisterDTO);
-  // 04) create the tokens
-  const [refreshToken, accessToken] = await createTokens(user);
-  // 05) set the cookies
-  setAuthCookies(res, refreshToken, accessToken);
-  // 06) send the response
-  // send the new user in the response
-  res.status(201).json({ message: 'Registered', accessToken });
-};
-
-export const login: RequestHandler<unknown, TokenResBody, LoginDTO> = async (req, res) => {
-  // get email and password from request body
-  const { email, password } = req.body;
-
-  // 01) query the DB to find user with that email
-  const user = await User.findOne({ email }).select('+password').lean();
-
-  // if not user is found, throw a 401 error and indicate invalid credentials
-  if (!user) throw new Error('Incorrect credentials', { cause: { status: 401 } });
-
-  // compare the password to the hashed password in the DB with bcrypt
-  const match = await bcrypt.compare(password, user.password);
-
-  // if match is false, throw a 401 error and indicate invalid credentials
-  if (!match) throw new Error('Incorrect credentials', { cause: { status: 401 } });
-
-  // delete all Refresh Tokens in DB where userId is equal to _id of user
-  await RefreshToken.deleteMany({ userId: user._id });
-
-  // create new tokens with util function
-  const [refreshToken, accessToken] = await createTokens(user);
-
-  // set auth cookies with util function
-  setAuthCookies(res, refreshToken, accessToken);
-
-  // send generic success response in body of response
-  res.status(200).json({ message: 'Logged in', accessToken });
-};
-
-export const refresh: RequestHandler<unknown, TokenResBody> = async (req, res) => {
-  // get refreshToken from request cookies
-  console.log('Received refresh request with cookies:', req.cookies);
-  const { refreshToken } = req.cookies;
-
-  // if there is no refresh token throw a 401 error with an appropriate message
-  if (!refreshToken) throw new Error('Refresh token is required.', { cause: { status: 401 } });
-
-  // query the DB for a RefreshToken that has a token property that matches the refreshToken
-  const storedToken = await RefreshToken.findOne({ token: refreshToken }).lean();
-
-  // if no storedToken is found, throw a 403 error with an appropriate message
-  if (!storedToken) {
-    throw new Error('Refresh token not found.', { cause: { status: 403 } });
+    //03 create user in DB with create method
+    const user = await User.create({ ...req.body, password: hashedPW } satisfies RegisterDTO);
+    // 04) create the tokens
+    const [refreshToken, accessToken] = await createTokens(user);
+    // 05) set the cookies
+    setAuthCookies(res, refreshToken, accessToken);
+    // 06) send the response
+    // send the new user in the response
+    res.status(201).json({ message: 'Registered', accessToken });
+  } catch (error) {
+    next(error instanceof Error ? error : new Error('Internal server error'));
   }
-
-  // delete the storedToken from the DB
-  await RefreshToken.findByIdAndDelete(storedToken._id);
-
-  // query the DB for the user with _id that matches the userId of the storedToken
-  const user = await User.findById(storedToken.userId).lean();
-
-  // if not user is found, throw a 403 error
-  if (!user) {
-    throw new Error('User not found.', { cause: { status: 403 } });
-  }
-
-  // create new tokens with util function
-  const [newRefreshToken, newAccessToken] = await createTokens(user);
-
-  // set auth cookies with util function
-  setAuthCookies(res, newRefreshToken, newAccessToken);
-
-  // send generic success response in body of response
-  res.json({ message: 'Refreshed', accessToken: newAccessToken });
 };
 
-export const logout: RequestHandler<unknown, SuccessResBody> = async (req, res) => {
-  const { refreshToken } = req.cookies;
+export const login: RequestHandler<unknown, TokenResBody, LoginDTO> = async (req, res, next) => {
+  try {
+    // get email and password from request body
+    const { email, password } = req.body;
 
-  // if there is a refreshToken cookie, delete corresponding RefreshToken from the DB
-  // if (refreshToken) await RefreshToken.deleteOne({ token: refreshToken });
+    // 01) query the DB to find user with that email
+    const user = await User.findOne({ email }).select('+password').lean();
 
-  // clear the refreshToken cookie
-  res.clearCookie('refreshToken');
-  res.clearCookie('accessToken');
+    // if not user is found, throw a 401 error and indicate invalid credentials
+    if (!user) throw new Error('Incorrect credentials', { cause: { status: 401 } });
 
-  // send generic success message in response body
-  res.json({ message: 'Successfully logged out' });
+    // compare the password to the hashed password in the DB with bcrypt
+    const match = await bcrypt.compare(password, user.password);
+
+    // if match is false, throw a 401 error and indicate invalid credentials
+    if (!match) throw new Error('Incorrect credentials', { cause: { status: 401 } });
+
+    // delete all Refresh Tokens in DB where userId is equal to _id of user
+    await RefreshToken.deleteMany({ userId: user._id });
+
+    // create new tokens with util function
+    const [refreshToken, accessToken] = await createTokens(user);
+
+    // set auth cookies with util function
+    setAuthCookies(res, refreshToken, accessToken);
+
+    // send generic success response in body of response
+    res.status(200).json({ message: 'Logged in', accessToken });
+  } catch (error) {
+    next(error instanceof Error ? error : new Error('Internal server error'));
+  }
+};
+
+export const refresh: RequestHandler<unknown, TokenResBody> = async (req, res, next) => {
+  try {
+    // get refreshToken from request cookies
+    console.log('Received refresh request with cookies:', req.cookies);
+    const { refreshToken } = req.cookies;
+
+    // if there is no refresh token throw a 401 error with an appropriate message
+    if (!refreshToken) throw new Error('Refresh token is required.', { cause: { status: 401 } });
+
+    // query the DB for a RefreshToken that has a token property that matches the refreshToken
+    const storedToken = await RefreshToken.findOne({ token: refreshToken }).lean();
+
+    // if no storedToken is found, throw a 403 error with an appropriate message
+    if (!storedToken) {
+      throw new Error('Refresh token not found.', { cause: { status: 403 } });
+    }
+
+    // delete the storedToken from the DB
+    await RefreshToken.findByIdAndDelete(storedToken._id);
+
+    // query the DB for the user with _id that matches the userId of the storedToken
+    const user = await User.findById(storedToken.userId).lean();
+
+    // if not user is found, throw a 403 error
+    if (!user) {
+      throw new Error('User not found.', { cause: { status: 403 } });
+    }
+
+    // create new tokens with util function
+    const [newRefreshToken, newAccessToken] = await createTokens(user);
+
+    // set auth cookies with util function
+    setAuthCookies(res, newRefreshToken, newAccessToken);
+
+    // send generic success response in body of response
+    res.json({ message: 'Refreshed', accessToken: newAccessToken });
+  } catch (error) {
+    next(error instanceof Error ? error : new Error('Internal server error'));
+  }
+};
+
+export const logout: RequestHandler<unknown, SuccessResBody> = async (_req, res, next) => {
+  try {
+    // clear the refreshToken cookie
+    res.clearCookie('refreshToken');
+    res.clearCookie('accessToken');
+
+    // send generic success message in response body
+    res.json({ message: 'Successfully logged out' });
+  } catch (error) {
+    next(error instanceof Error ? error : new Error('Internal server error'));
+  }
 };
 
 export const me: RequestHandler<unknown, MeResBody> = async (req, res, next) => {
-  // get accessToken from request cookies
-  const authHeader = req.header('authorization');
-  const accessToken = authHeader?.startsWith('Bearer ') && authHeader.split(' ')[1];
-
-  // if there is no access token throw a 401 error with an appropriate message
-  if (!accessToken) throw new Error('Access token is required.', { cause: { status: 401 } });
-
   try {
+    // get accessToken from request cookies
+    const authHeader = req.header('authorization');
+    const accessToken = authHeader?.startsWith('Bearer ') && authHeader.split(' ')[1];
+
+    // if there is no access token throw a 401 error with an appropriate message
+    if (!accessToken) throw new Error('Access token is required.', { cause: { status: 401 } });
+
     // verify the access token
     const decoded = jwt.verify(accessToken, ACCESS_JWT_SECRET) as jwt.JwtPayload;
     // console.log(decoded)
@@ -146,11 +156,10 @@ export const me: RequestHandler<unknown, MeResBody> = async (req, res, next) => 
       throw new Error('Invalid or expired access token.', { cause: { status: 403 } });
 
     // query the DB to find user by id that matches decoded.sub
-    const user = await User.findById(decoded.sub).select('-password').lean();
+    const user = await User.findById(decoded.sub).lean();
 
     // throw a 404 error if no user is found
     if (!user) throw new Error('User not found', { cause: { status: 404 } });
-
     // send generic success message and user info in response body
     res.json({ message: 'Valid token', user });
   } catch (error) {
